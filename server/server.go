@@ -5,15 +5,15 @@ import (
 	"quickcommerce/controller"
 )
 
-func New(ctrl *controller.Controller) http.Handler {
+func New(controller *controller.Controller) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /customers", ctrl.SignupCustomer)
-	mux.HandleFunc("POST /delivery-partners", ctrl.SignupDeliveryPartner)
-	mux.HandleFunc("POST /orders", ctrl.CreateOrder)
-	mux.HandleFunc("POST /orders/pickup", ctrl.PickUp)
-	mux.HandleFunc("POST /orders/deliver", ctrl.Deliver)
-	mux.HandleFunc("POST /orders/cancel", ctrl.Cancel)
-	mux.HandleFunc("GET /orders/{id}", ctrl.GetOrder)
-	mux.HandleFunc("GET /delivery-partners/{id}", ctrl.GetDeliveryPartner)
+	mux.HandleFunc("POST /customers", controller.SignupCustomer)
+	mux.HandleFunc("POST /delivery-partners", controller.SignupDeliveryPartner)
+	mux.HandleFunc("POST /orders", controller.CreateOrder)
+	mux.HandleFunc("POST /orders/pickup", controller.PickUp)
+	mux.HandleFunc("POST /orders/deliver", controller.Deliver)
+	mux.HandleFunc("POST /orders/cancel", controller.Cancel)
+	mux.HandleFunc("GET /orders/{id}", controller.GetOrder)
+	mux.HandleFunc("GET /delivery-partners/{id}", controller.GetDeliveryPartner)
 	return mux
 }
