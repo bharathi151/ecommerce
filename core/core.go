@@ -1,34 +1,53 @@
 package core
 
-import "quickcommerce/repo"
+import (
+	"quickcommerce/models"
+	"quickcommerce/repo"
+)
 
 type Core struct {
-	r *repo.Repo
+	repository *repo.Repo
 }
 
-func NewCore(r *repo.Repo) *Core {
-	return &Core{r: r}
+func NewCore(repository *repo.Repo) *Core {
+	return &Core{repository: repository}
 }
 
 func (c *Core) Assign() {
-	for len(c.r.OrderQueue) > 0 && len(c.r.PartnerQueue) > 0 {
-		o := c.r.Orders[c.r.OrderQueue[0]]
-		if o == nil || o.Status != "CREATED" {
-			c.r.OrderQueue = c.r.OrderQueue[1:]
+	for len(c.repository.OrderQueue) > 0 && len(c.repository.PartnerQueue) > 0 {
+		order := c.repository.Orders[c.repository.OrderQueue[0]]
+		if order == nil || order.Status != models.OrderStatusCreated {
+			c.popOrder()
 			continue
 		}
-		dp := c.r.DeliveryPartners[c.r.PartnerQueue[0]]
-		if dp == nil || dp.Busy {
-			c.r.PartnerQueue = c.r.PartnerQueue[1:]
+		partner := c.repository.DeliveryPartners[c.repository.PartnerQueue[0]]
+		if partner == nil || partner.Status == models.PartnerStatusBusy {
+			c.popPartner()
 			continue
 		}
 
-		c.r.OrderQueue = c.r.OrderQueue[1:]
-		c.r.PartnerQueue = c.r.PartnerQueue[1:]
+		c.popOrder()
+		c.popPartner()
 
-		o.Status = "ASSIGNED"
-		o.DeliveryPartnerID = dp.ID
-		dp.Busy = true
-		dp.OrderID = o.ID
+		order.Status = models.OrderStatusAssigned
+		order.DeliveryPartnerID = partner.ID
+		partner.Status = models.PartnerStatusBusy
+		partner.OrderID = order.ID
+	}
+}
+
+func (c *Core) popOrder() {
+	c.repository.OrderQueue[0] = ""
+	c.repository.OrderQueue = c.repository.OrderQueue[1:]
+	if len(c.repository.OrderQueue) == 0 {
+		c.repository.OrderQueue = nil
+	}
+}
+
+func (c *Core) popPartner() {
+	c.repository.PartnerQueue[0] = ""
+	c.repository.PartnerQueue = c.repository.PartnerQueue[1:]
+	if len(c.repository.PartnerQueue) == 0 {
+		c.repository.PartnerQueue = nil
 	}
 }

@@ -7,7 +7,7 @@ import (
 )
 
 type Repo struct {
-	mu               sync.Mutex
+	sync.Mutex
 	Customers        map[string]models.Customer
 	DeliveryPartners map[string]*models.DeliveryPartner
 	Orders           map[string]*models.Order
@@ -24,9 +24,6 @@ func NewRepo() *Repo {
 		seq:              100,
 	}
 }
-
-func (r *Repo) Lock()   { r.mu.Lock() }
-func (r *Repo) Unlock() { r.mu.Unlock() }
 
 func (r *Repo) NextID() string {
 	r.seq++

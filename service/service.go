@@ -7,122 +7,130 @@ import (
 )
 
 type Service struct {
-	r *repo.Repo
-	c *core.Core
+	repository *repo.Repo
+	assigner   *core.Core
 }
 
-func NewService(r *repo.Repo, c *core.Core) *Service {
-	return &Service{r: r, c: c}
+func NewService(repository *repo.Repo, assigner *core.Core) *Service {
+	return &Service{repository: repository, assigner: assigner}
 }
 
 func (s *Service) SignupCustomer(id, name string) (models.Customer, error) {
-	s.r.Lock()
-	defer s.r.Unlock()
-	if _, ok := s.r.Customers[id]; ok {
+	s.repository.Lock()
+	defer s.repository.Unlock()
+	if _, ok := s.repository.Customers[id]; ok {
 		return models.Customer{}, models.ErrExists
 	}
 	cust := models.Customer{ID: id, Name: name}
-	s.r.Customers[id] = cust
+	s.repository.Customers[id] = cust
 	return cust, nil
 }
 
 func (s *Service) SignupDeliveryPartner(id, name string) (models.DeliveryPartner, error) {
-	s.r.Lock()
-	defer s.r.Unlock()
-	if _, ok := s.r.DeliveryPartners[id]; ok {
+	s.repository.Lock()
+	defer s.repository.Unlock()
+	if _, ok := s.repository.DeliveryPartners[id]; ok {
 		return models.DeliveryPartner{}, models.ErrExists
 	}
-	dp := &models.DeliveryPartner{ID: id, Name: name}
-	s.r.DeliveryPartners[id] = dp
-	s.r.PartnerQueue = append(s.r.PartnerQueue, id)
-	s.c.Assign()
-	return *dp, nil
+	partner := &models.DeliveryPartner{ID: id, Name: name, Status: models.PartnerStatusAvailable}
+	s.repository.DeliveryPartners[id] = partner
+	s.repository.PartnerQueue = append(s.repository.PartnerQueue, id)
+	s.assigner.Assign()
+	return *partner, nil
 }
 
 func (s *Service) CreateOrder(customerID, item string) (models.Order, error) {
-	s.r.Lock()
-	defer s.r.Unlock()
-	if _, ok := s.r.Customers[customerID]; !ok {
+	s.repository.Lock()
+	defer s.repository.Unlock()
+	if _, ok := s.repository.Customers[customerID]; !ok {
 		return models.Order{}, models.ErrNotFound
 	}
-	o := &models.Order{ID: s.r.NextID(), CustomerID: customerID, Item: item, Status: "CREATED"}
-	s.r.Orders[o.ID] = o
-	s.r.OrderQueue = append(s.r.OrderQueue, o.ID)
-	s.c.Assign()
-	return *o, nil
+	order := &models.Order{
+		ID:         s.repository.NextID(),
+		CustomerID: customerID,
+		Item:       item,
+		Status:     models.OrderStatusCreated,
+	}
+	s.repository.Orders[order.ID] = order
+	s.repository.OrderQueue = append(s.repository.OrderQueue, order.ID)
+	s.assigner.Assign()
+	return *order, nil
 }
 
-func (s *Service) PickUp(dpID, orderID string) (models.Order, error) {
-	s.r.Lock()
-	defer s.r.Unlock()
-	o, ok := s.r.Orders[orderID]
-	if !ok {
+func (s *Service) PickUp(partnerID, orderID string) (models.Order, error) {
+	s.repository.Lock()
+	defer s.repository.Unlock()
+	order, orderExists := s.repository.Orders[orderID]
+	_, partnerExists := s.repository.DeliveryPartners[partnerID]
+	if !orderExists || !partnerExists {
 		return models.Order{}, models.ErrNotFound
 	}
-	if o.Status != "ASSIGNED" || o.DeliveryPartnerID != dpID {
+	if order.Status != models.OrderStatusAssigned || order.DeliveryPartnerID != partnerID {
 		return models.Order{}, models.ErrState
 	}
-	o.Status = "PICKED_UP"
-	return *o, nil
+	order.Status = models.OrderStatusPickedUp
+	return *order, nil
 }
 
-func (s *Service) Deliver(dpID, orderID string) (models.Order, error) {
-	s.r.Lock()
-	defer s.r.Unlock()
-	o, ok := s.r.Orders[orderID]
-	dp, dpOk := s.r.DeliveryPartners[dpID]
-	if !ok || !dpOk {
+func (s *Service) Deliver(partnerID, orderID string) (models.Order, error) {
+	s.repository.Lock()
+	defer s.repository.Unlock()
+	order, orderExists := s.repository.Orders[orderID]
+	partner, partnerExists := s.repository.DeliveryPartners[partnerID]
+	if !orderExists || !partnerExists {
 		return models.Order{}, models.ErrNotFound
 	}
-	if o.Status != "PICKED_UP" || o.DeliveryPartnerID != dpID {
+	if order.Status != models.OrderStatusPickedUp || order.DeliveryPartnerID != partnerID {
 		return models.Order{}, models.ErrState
 	}
-	o.Status = "DELIVERED"
-	dp.Busy = false
-	dp.OrderID = ""
-	s.r.PartnerQueue = append(s.r.PartnerQueue, dpID)
-	s.c.Assign()
-	return *o, nil
+	order.Status = models.OrderStatusDelivered
+	partner.Status = models.PartnerStatusAvailable
+	partner.OrderID = ""
+	s.repository.PartnerQueue = append(s.repository.PartnerQueue, partnerID)
+	s.assigner.Assign()
+	return *order, nil
 }
 
 func (s *Service) Cancel(orderID string) (models.Order, error) {
-	s.r.Lock()
-	defer s.r.Unlock()
-	o, ok := s.r.Orders[orderID]
+	s.repository.Lock()
+	defer s.repository.Unlock()
+	order, ok := s.repository.Orders[orderID]
 	if !ok {
 		return models.Order{}, models.ErrNotFound
 	}
-	if o.Status == "PICKED_UP" || o.Status == "DELIVERED" || o.Status == "CANCELLED" {
-		return models.Order{}, models.ErrState
+	if order.Status == models.OrderStatusPickedUp ||
+		order.Status == models.OrderStatusDelivered ||
+		order.Status == models.OrderStatusCancelled {
+		return models.Order{}, models.ErrCannotCancel
 	}
-	dpID := o.DeliveryPartnerID
-	o.Status = "CANCELLED"
-	o.DeliveryPartnerID = ""
-	if dp, ok := s.r.DeliveryPartners[dpID]; ok && dp.OrderID == orderID {
-		dp.Busy = false
-		dp.OrderID = ""
-		s.r.PartnerQueue = append(s.r.PartnerQueue, dpID)
-		s.c.Assign()
+	partnerID := order.DeliveryPartnerID
+	order.Status = models.OrderStatusCancelled
+	order.DeliveryPartnerID = ""
+	if partner, ok := s.repository.DeliveryPartners[partnerID]; ok && partner.OrderID == orderID {
+		partner.Status = models.PartnerStatusAvailable
+		partner.OrderID = ""
+		s.repository.PartnerQueue = append(s.repository.PartnerQueue, partnerID)
+		s.assigner.Assign()
 	}
-	return *o, nil
+	return *order, nil
 }
 
 func (s *Service) GetOrder(id string) (models.Order, error) {
-	s.r.Lock()
-	defer s.r.Unlock()
-	o, ok := s.r.Orders[id]
+	s.repository.Lock()
+	defer s.repository.Unlock()
+	order, ok := s.repository.Orders[id]
 	if !ok {
 		return models.Order{}, models.ErrNotFound
 	}
-	return *o, nil
+	return *order, nil
 }
 
 func (s *Service) GetDeliveryPartner(id string) (models.DeliveryPartner, error) {
-	s.r.Lock()
-	defer s.r.Unlock()
-	dp, ok := s.r.DeliveryPartners[id]
+	s.repository.Lock()
+	defer s.repository.Unlock()
+	partner, ok := s.repository.DeliveryPartners[id]
 	if !ok {
 		return models.DeliveryPartner{}, models.ErrNotFound
 	}
-	return *dp, nil
+	return *partner, nil
 }
